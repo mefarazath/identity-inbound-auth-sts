@@ -61,11 +61,12 @@ import org.wso2.carbon.user.core.UserCoreConstants;
 import org.wso2.carbon.utils.ServerConstants;
 import org.wso2.carbon.utils.multitenancy.MultitenantConstants;
 
-import javax.xml.namespace.QName;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Properties;
+import javax.net.ssl.KeyManager;
+import javax.xml.namespace.QName;
 
 public abstract class RequestProcessor {
 
@@ -207,15 +208,12 @@ public abstract class RequestProcessor {
     }
 
     protected SAMLTokenIssuerConfig getSAMLTokenIssuerConfig(AxisService service, boolean isSuperTenant) throws Exception {
-        UserRegistry systemRegistry = null;
-        String keyAlias = null;
-        String keyPassword = null;
-        KeyStoreAdmin admin = null;
-        KeyStoreData[] keystores = null;
-        String privateKeyAlias = null;
-        String keyStoreName = null;
-        String issuerName = null;
-        ServerConfiguration serverConfig = null;
+        UserRegistry systemRegistry;
+        String keyAlias;
+        String keyPassword;
+        String privateKeyAlias;
+        String keyStoreName;
+        String issuerName;
         String ttl;
         IdentityProvider identityProvider;
         String tenantDomain;
@@ -254,35 +252,26 @@ public abstract class RequestProcessor {
             idPEntityId = IdentityUtil.getProperty(IdentityConstants.ServerConfig.ENTITY_ID);
         }
 
-        serverConfig = ServerConfiguration.getInstance();
-        keyAlias = serverConfig.getFirstProperty("Security.KeyStore.KeyAlias");
-        keyPassword = serverConfig.getFirstProperty("Security.KeyStore.KeyPassword");
+
         issuerName = idPEntityId;
-        ttl = serverConfig.getFirstProperty("STSTimeToLive");
+        ttl = ServerConfiguration.getInstance().getFirstProperty("STSTimeToLive");
 
         if (issuerName == null) {
             // HostName not set :-( use wso2wsas-sts
             issuerName = "Identity-passive-sts";
         }
 
-        keystores = getKeyStores(systemRegistry);
-
-        for (int i = 0; i < keystores.length; i++) {
-            boolean superTenant = MultitenantConstants.SUPER_TENANT_ID == CarbonContext
-                    .getThreadLocalCarbonContext().getTenantId() ? true : false;
-            if (superTenant && KeyStoreUtil.isPrimaryStore(keystores[i].getKeyStoreName())) {
-                keyStoreName = keystores[i].getKeyStoreName();
-                privateKeyAlias = KeyStoreUtil.getPrivateKeyAlias(KeyStoreManager.getInstance(
-                        MultitenantConstants.SUPER_TENANT_ID).getKeyStore(keyStoreName));
-                break;
-            } else if (!superTenant && generateKSNameFromDomainName(tenantDomain)
-                    .equals(keystores[i].getKeyStoreName())) {
-                keyStoreName = keystores[i].getKeyStoreName();
-                privateKeyAlias = tenantDomain;
-                keyPassword = KeyStoreManager.getInstance(tenantId).getKeyStorePassword(keyStoreName);
-                keyAlias = tenantDomain;
-                break;
-            }
+        boolean isSuperTenantDomain = (MultitenantConstants.SUPER_TENANT_ID == tenantId);
+        if (isSuperTenantDomain) {
+            keyStoreName = getSuperTenantKeyStoreName();
+            keyPassword = ServerConfiguration.getInstance().getFirstProperty("Security.KeyStore.KeyPassword");
+            keyAlias = ServerConfiguration.getInstance().getFirstProperty("Security.KeyStore.KeyAlias");
+            privateKeyAlias = ServerConfiguration.getInstance().getFirstProperty("Security.KeyStore.KeyAlias");
+        } else {
+            keyStoreName = generateKSNameFromDomainName(tenantDomain);
+            keyPassword = KeyStoreManager.getInstance(tenantId).getKeyStorePassword(keyStoreName);
+            keyAlias = tenantDomain;
+            privateKeyAlias = tenantDomain;
         }
 
         if (privateKeyAlias != null) {
@@ -336,5 +325,11 @@ public abstract class RequestProcessor {
             return stsSamlConfig;
         }
         return null;
+    }
+
+    private String getSuperTenantKeyStoreName() {
+        String keyStoreFileLocation = ServerConfiguration.getInstance()
+                .getFirstProperty(RegistryResources.SecurityManagement.SERVER_PRIMARY_KEYSTORE_FILE);
+        return KeyStoreUtil.getKeyStoreFileName(keyStoreFileLocation);
     }
 }
